@@ -3,36 +3,46 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Snake Stream Overlay</title>
+<title>Snake Arcade INSANE</title>
 
 <style>
 body {
   margin: 0;
-  background: transparent;
+  background: black;
   overflow: hidden;
-  font-family: Arial, sans-serif;
+  font-family: 'Segoe UI', sans-serif;
 }
 
-canvas { transition: transform 0.05s linear; }
+canvas {
+  transition: transform 0.05s linear;
+}
 
 #ui {
   position: absolute;
   top: 10px;
   left: 10px;
-  color: white;
-  text-shadow: 0 0 10px black;
+  color: #00ffcc;
+  text-shadow: 0 0 10px #00ffcc;
 }
 
-#score { font-size: 24px; font-weight: bold; }
-#combo { font-size: 16px; color: gold; }
+#score {
+  font-size: 28px;
+  font-weight: bold;
+}
+
+#combo {
+  font-size: 18px;
+  color: gold;
+}
 
 #alerts {
   position: absolute;
   bottom: 50px;
   left: 50%;
   transform: translateX(-50%);
+  font-size: 26px;
   color: white;
-  font-size: 22px;
+  text-shadow: 0 0 20px white;
 }
 
 .alert {
@@ -71,38 +81,71 @@ const sounds = {
   big: new Audio("https://actions.google.com/sounds/v1/explosions/explosion.ogg")
 };
 
-function play(s, v=0.5){
-  sounds[s].volume = v;
-  sounds[s].currentTime = 0;
+function play(s,v=0.5){
+  sounds[s].volume=v;
+  sounds[s].currentTime=0;
   sounds[s].play();
 }
 
-// ===== SHAKE =====
+// ===== EFFECTS =====
 let shakeTime=0, shakePower=0;
+let zoom=1;
+let flash=0;
 
-function shakeScreen(p=10,t=300){
-  shakePower=p;
-  shakeTime=t;
-}
+function shakeScreen(p=10,t=300){shakePower=p;shakeTime=t;}
+function triggerZoom(a=1.2){zoom=a;}
+function triggerFlash(p=1){flash+=p;if(flash>1)flash=1;}
 
-function applyShake(){
+function applyEffects(){
+  let x=0,y=0;
   if(shakeTime>0){
     shakeTime-=16;
-    let x=(Math.random()-0.5)*shakePower;
-    let y=(Math.random()-0.5)*shakePower;
-    canvas.style.transform=`translate(${x}px,${y}px)`;
-  } else canvas.style.transform="translate(0,0)";
+    x=(Math.random()-0.5)*shakePower;
+    y=(Math.random()-0.5)*shakePower;
+  }
+  zoom += (1-zoom)*0.1;
+  canvas.style.transform=`translate(${x}px,${y}px) scale(${zoom})`;
+}
+
+// ===== PARTICLES =====
+let particles=[];
+function spawnParticles(x,y,color,count=10){
+  for(let i=0;i<count;i++){
+    particles.push({
+      x,y,
+      vx:(Math.random()-0.5)*4,
+      vy:(Math.random()-0.5)*4,
+      life:1,
+      color
+    });
+  }
+}
+function updateParticles(){
+  particles.forEach(p=>{
+    p.x+=p.vx;
+    p.y+=p.vy;
+    p.life-=0.02;
+  });
+  particles=particles.filter(p=>p.life>0);
+}
+function drawParticles(){
+  particles.forEach(p=>{
+    ctx.globalAlpha=p.life;
+    ctx.fillStyle=p.color;
+    ctx.fillRect(p.x,p.y,4,4);
+  });
+  ctx.globalAlpha=1;
 }
 
 // ===== GAME =====
 const GRID=10;
-const COLS=canvas.width/GRID;
-const ROWS=canvas.height/GRID;
+const COLS=600/GRID;
+const ROWS=600/GRID;
 
 let snake=[{x:300,y:300}];
-let dx=10, dy=0;
+let dx=10,dy=0;
 let foods=[];
-let score=0, combo=1, speed=100;
+let score=0,combo=1,speed=100;
 
 // ===== UI =====
 function showAlert(t){
@@ -144,23 +187,32 @@ function move(){
 }
 
 // ===== BOSS =====
-let boss=false, bossHP=0;
+let boss=false,bossHP=0,bossPulse=0;
+let bossX=300,bossY=200;
 
 function startBoss(){
   boss=true;
   bossHP=100;
-  showAlert("💀 BOSS FIGHT!");
+  triggerZoom(1.5);
+  shakeScreen(20,999999);
+  triggerFlash(1);
   play("big",0.8);
+  showAlert("💀 BOSS FIGHT!");
 }
 
 function hitBoss(d){
   if(!boss) return;
   bossHP-=d;
   shakeScreen(10,200);
+  triggerFlash(0.3);
+  spawnParticles(bossX,bossY,"red",20);
+
   if(bossHP<=0){
     boss=false;
+    triggerFlash(1);
+    play("big",1);
     showAlert("🎉 BOSS DEFEATED!");
-    spawnFood("gold",20);
+    spawnFood("gold",25);
   }
 }
 
@@ -171,6 +223,8 @@ ws.onmessage=(e)=>{
   let d=JSON.parse(e.data);
   if(d.event==="gift"){
     let g=d.data.giftName;
+
+    play("gift",0.4);
 
     if(g==="Galaxy" && !boss) startBoss();
 
@@ -183,12 +237,18 @@ ws.onmessage=(e)=>{
     if(g==="Lion"){
       spawnFood("normal",10);
       hitBoss(10);
+      triggerZoom(1.2);
+      triggerFlash(0.5);
+      spawnParticles(300,300,"white",40);
       showAlert("🦁 BIG HIT");
     }
 
     if(g==="Galaxy"){
       spawnFood("gold",8);
       hitBoss(25);
+      triggerZoom(1.4);
+      triggerFlash(1);
+      spawnParticles(300,300,"white",60);
       showAlert("🌌 CRITICAL");
     }
   }
@@ -208,6 +268,7 @@ function update(){
     if(f.x===h.x&&f.y===h.y){
       ate=true;
       play("eat",0.3);
+      spawnParticles(h.x,h.y,f.type==="gold"?"gold":"red",12);
       score+=f.type==="gold"?50:10;
       return false;
     }
@@ -215,30 +276,72 @@ function update(){
   });
 
   if(!ate) snake.pop();
+
+  if(boss){
+    spawnParticles(bossX,bossY,"red",2);
+  }
+
+  updateParticles();
+
   document.getElementById("score").innerText="Score: "+score;
 }
 
 function draw(){
   ctx.clearRect(0,0,600,600);
 
-  ctx.fillStyle="lime";
-  snake.forEach(s=>ctx.fillRect(s.x,s.y,10,10));
+  // flash
+  if(flash>0){
+    ctx.fillStyle=`rgba(255,255,255,${flash})`;
+    ctx.fillRect(0,0,600,600);
+    flash*=0.85;
+  }
 
+  // grid
+  ctx.strokeStyle="rgba(255,255,255,0.05)";
+  for(let i=0;i<600;i+=20){
+    ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,600); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(600,i); ctx.stroke();
+  }
+
+  // snake rainbow
+  snake.forEach((s,i)=>{
+    let hue=(performance.now()*0.1+i*10)%360;
+    ctx.fillStyle=`hsl(${hue},100%,60%)`;
+    ctx.shadowBlur=20;
+    ctx.shadowColor=ctx.fillStyle;
+    ctx.fillRect(s.x,s.y,10,10);
+  });
+  ctx.shadowBlur=0;
+
+  // food
   foods.forEach(f=>{
+    f.pulse+=0.15;
+    let size=10+Math.sin(f.pulse)*3;
     ctx.fillStyle=f.type==="gold"?"gold":"red";
-    ctx.fillRect(f.x,f.y,10,10);
+    ctx.fillRect(f.x,f.y,size,size);
   });
 
+  // boss
   if(boss){
-    ctx.fillStyle="red";
-    ctx.fillRect(250,50,100,20);
+    bossPulse+=0.1;
+    let size=50+Math.sin(bossPulse)*5;
+    ctx.shadowBlur=40;
+    ctx.shadowColor="red";
+    ctx.fillStyle="darkred";
+    ctx.fillRect(bossX-size/2,bossY-size/2,size,size);
+    ctx.shadowBlur=0;
+
     ctx.fillStyle="black";
-    ctx.fillRect(250,50,bossHP,20);
+    ctx.fillRect(150,20,300,20);
+    ctx.fillStyle="red";
+    ctx.fillRect(150,20,(bossHP/100)*300,20);
   }
+
+  drawParticles();
 }
 
 function loop(){
-  applyShake();
+  applyEffects();
   update();
   draw();
   setTimeout(loop,speed);
