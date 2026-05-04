@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Snake Stream Overlay</title>
+
+<style>
+body {
+  margin: 0;
+  background: transparent;
+  overflow: hidden;
+  font-family: Arial, sans-serif;
+}
+
+canvas { transition: transform 0.05s linear; }
+
+#ui {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  color: white;
+  text-shadow: 0 0 10px black;
+}
+
+#score { font-size: 24px; font-weight: bold; }
+#combo { font-size: 16px; color: gold; }
+
+#alerts {
+  position: absolute;
+  bottom: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: white;
+  font-size: 22px;
+}
+
+.alert {
+  animation: floatUp 2s ease-out forwards;
+}
+
+@keyframes floatUp {
+  0% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-50px); }
+}
+</style>
+
+</head>
+
+<body>
+
+<canvas id="game"></canvas>
+
+<div id="ui">
+  <div id="score">Score: 0</div>
+  <div id="combo">Combo: x1</div>
+</div>
+
+<div id="alerts"></div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+canvas.width = 600;
+canvas.height = 600;
+
+// ===== SOUND =====
+const sounds = {
+  eat: new Audio("https://actions.google.com/sounds/v1/cartoon/pop.ogg"),
+  gift: new Audio("https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg"),
+  big: new Audio("https://actions.google.com/sounds/v1/explosions/explosion.ogg")
+};
+
+function play(s, v=0.5){
+  sounds[s].volume = v;
+  sounds[s].currentTime = 0;
+  sounds[s].play();
+}
+
+// ===== SHAKE =====
+let shakeTime=0, shakePower=0;
+
+function shakeScreen(p=10,t=300){
+  shakePower=p;
+  shakeTime=t;
+}
+
+function applyShake(){
+  if(shakeTime>0){
+    shakeTime-=16;
+    let x=(Math.random()-0.5)*shakePower;
+    let y=(Math.random()-0.5)*shakePower;
+    canvas.style.transform=`translate(${x}px,${y}px)`;
+  } else canvas.style.transform="translate(0,0)";
+}
+
+// ===== GAME =====
+const GRID=10;
+const COLS=canvas.width/GRID;
+const ROWS=canvas.height/GRID;
+
+let snake=[{x:300,y:300}];
+let dx=10, dy=0;
+let foods=[];
+let score=0, combo=1, speed=100;
+
+// ===== UI =====
+function showAlert(t){
+  let d=document.createElement("div");
+  d.className="alert";
+  d.innerText=t;
+  document.getElementById("alerts").appendChild(d);
+  setTimeout(()=>d.remove(),2000);
+}
+
+// ===== FOOD =====
+function spawnFood(type="normal",amt=1){
+  for(let i=0;i<amt;i++){
+    foods.push({
+      x:Math.floor(Math.random()*COLS)*GRID,
+      y:Math.floor(Math.random()*ROWS)*GRID,
+      type,
+      pulse:Math.random()*Math.PI
+    });
+  }
+}
+
+// ===== PATH =====
+let path=[];
+for(let y=0;y<ROWS;y++){
+  if(y%2===0){
+    for(let x=0;x<COLS;x++) path.push({x:x*GRID,y:y*GRID});
+  } else {
+    for(let x=COLS-1;x>=0;x--) path.push({x:x*GRID,y:y*GRID});
+  }
+}
+
+// ===== AI =====
+function move(){
+  let h=snake[0];
+  let i=path.findIndex(p=>p.x===h.x&&p.y===h.y);
+  let n=path[(i+1)%path.length];
+  return {dx:n.x-h.x,dy:n.y-h.y};
+}
+
+// ===== BOSS =====
+let boss=false, bossHP=0;
+
+function startBoss(){
+  boss=true;
+  bossHP=100;
+  showAlert("💀 BOSS FIGHT!");
+  play("big",0.8);
+}
+
+function hitBoss(d){
+  if(!boss) return;
+  bossHP-=d;
+  shakeScreen(10,200);
+  if(bossHP<=0){
+    boss=false;
+    showAlert("🎉 BOSS DEFEATED!");
+    spawnFood("gold",20);
+  }
+}
+
+// ===== TIKFINITY =====
+const ws=new WebSocket("ws://localhost:21213/");
+
+ws.onmessage=(e)=>{
+  let d=JSON.parse(e.data);
+  if(d.event==="gift"){
+    let g=d.data.giftName;
+
+    if(g==="Galaxy" && !boss) startBoss();
+
+    if(g==="Rose"){
+      spawnFood();
+      hitBoss(1);
+      showAlert("🌹 HIT");
+    }
+
+    if(g==="Lion"){
+      spawnFood("normal",10);
+      hitBoss(10);
+      showAlert("🦁 BIG HIT");
+    }
+
+    if(g==="Galaxy"){
+      spawnFood("gold",8);
+      hitBoss(25);
+      showAlert("🌌 CRITICAL");
+    }
+  }
+};
+
+// ===== LOOP =====
+function update(){
+  let m=move();
+  dx=m.dx; dy=m.dy;
+
+  let h={x:snake[0].x+dx,y:snake[0].y+dy};
+  snake.unshift(h);
+
+  let ate=false;
+
+  foods=foods.filter(f=>{
+    if(f.x===h.x&&f.y===h.y){
+      ate=true;
+      play("eat",0.3);
+      score+=f.type==="gold"?50:10;
+      return false;
+    }
+    return true;
+  });
+
+  if(!ate) snake.pop();
+  document.getElementById("score").innerText="Score: "+score;
+}
+
+function draw(){
+  ctx.clearRect(0,0,600,600);
+
+  ctx.fillStyle="lime";
+  snake.forEach(s=>ctx.fillRect(s.x,s.y,10,10));
+
+  foods.forEach(f=>{
+    ctx.fillStyle=f.type==="gold"?"gold":"red";
+    ctx.fillRect(f.x,f.y,10,10);
+  });
+
+  if(boss){
+    ctx.fillStyle="red";
+    ctx.fillRect(250,50,100,20);
+    ctx.fillStyle="black";
+    ctx.fillRect(250,50,bossHP,20);
+  }
+}
+
+function loop(){
+  applyShake();
+  update();
+  draw();
+  setTimeout(loop,speed);
+}
+
+loop();
+</script>
+
+</body>
+</html>
