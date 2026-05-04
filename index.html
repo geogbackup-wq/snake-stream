@@ -1,9 +1,8 @@
 <!DOCTYPE html>
-
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Snake Arcade AI (Growth + Perfect Mode)</title>
+<title>Snake AI - Lookahead + Auto Restart</title>
 
 <style>
 body {
@@ -26,11 +25,30 @@ canvas {
 }
 
 #score {
-  font-size: 26px;
-  font-weight: bold;
+  font-size: 24px;
+}
+
+#gameOver {
+  position: absolute;
+  top:0;
+  left:0;
+  width:100%;
+  height:100%;
+  background: rgba(0,0,0,0.85);
+  display:none;
+  justify-content:center;
+  align-items:center;
+  flex-direction:column;
+  color:white;
+  font-size:28px;
+}
+
+#countdown {
+  margin-top: 10px;
+  font-size: 20px;
+  color: #00ffcc;
 }
 </style>
-
 </head>
 
 <body>
@@ -41,27 +59,27 @@ canvas {
   <div id="score">Score: 0</div>
 </div>
 
+<div id="gameOver">
+  <div>💀 GAME OVER</div>
+  <div id="countdown"></div>
+</div>
+
 <script>
-// ================= CANVAS =================
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 canvas.width = 600;
 canvas.height = 600;
 
-// ================= GRID =================
 const GRID = 10;
 const COLS = canvas.width / GRID;
 const ROWS = canvas.height / GRID;
 
 // ================= STATE =================
-let snake = [{x:300,y:300}];
-let foods = [];
-let score = 0;
-let grow = 0;
-let speed = 60;
+let snake, foods, score, grow, gameRunning;
 
-// ================= HAMILTONIAN PATH =================
 let path = [];
+
+// build Hamiltonian cycle
 for(let y=0;y<ROWS;y++){
   if(y%2===0){
     for(let x=0;x<COLS;x++){
@@ -74,120 +92,184 @@ for(let y=0;y<ROWS;y++){
   }
 }
 
-// ================= FOOD SYSTEM =================
-let foodTimer = 0;
-let foodMode = "normal";
+// ================= INIT =================
+function reset(){
+  snake=[{x:300,y:300}];
+  foods=[];
+  score=0;
+  grow=0;
+  gameRunning=true;
+  document.getElementById("gameOver").style.display="none";
+}
+reset();
 
+// ================= SAFE FOOD =================
 function spawnFood(){
-  let p = path[Math.floor(Math.random()*path.length)];
+  let pos;
+  let safe=false;
 
-  let type = "normal";
-  if(foodMode === "burst") type = "gold";
-  else if(Math.random() < 0.1) type = "gold";
-
-  foods.push({
-    x:p.x,
-    y:p.y,
-    pulse:0,
-    type
-  });
-}
-
-// spawn loop
-function foodSystem(){
-  foodTimer++;
-
-  let interval = Math.max(10, 25 - Math.floor(score/50));
-
-  if(foodTimer > 500){
-    foodMode = "burst";
-    for(let i=0;i<6;i++) spawnFood();
-    setTimeout(()=>foodMode="normal",2000);
-    foodTimer = 0;
+  while(!safe){
+    pos = path[Math.floor(Math.random()*path.length)];
+    safe = !snake.some(s=>s.x===pos.x && s.y===pos.y);
   }
 
-  if(foodTimer % interval === 0){
-    spawnFood();
-  }
+  foods.push({x:pos.x,y:pos.y});
 }
 
-// ================= PERFECT AI =================
+// ================= LOOKAHEAD AI =================
+function clone(s){return s.map(p=>({...p}));}
+
+function simulate(snakeSim, move){
+  let h = snakeSim[0];
+
+  let nh = {x:h.x+move.dx,y:h.y+move.dy};
+
+  for(let i=1;i<snakeSim.length;i++){
+    if(snakeSim[i].x===nh.x && snakeSim[i].y===nh.y){
+      return null;
+    }
+  }
+
+  snakeSim.unshift(nh);
+
+  let ate=false;
+  for(let f of foods){
+    if(f.x===nh.x && f.y===nh.y){
+      ate=true;
+      break;
+    }
+  }
+
+  if(!ate) snakeSim.pop();
+
+  return snakeSim;
+}
+
+function moves(){
+  return [
+    {dx:10,dy:0},
+    {dx:-10,dy:0},
+    {dx:0,dy:10},
+    {dx:0,dy:-10}
+  ];
+}
+
+function evaluate(s){
+  if(!s) return -999999;
+  return s.length;
+}
+
 function getMove(){
-  let head = snake[0];
-  let i = path.findIndex(p=>p.x===head.x && p.y===head.y);
-  let next = path[(i+1)%path.length];
+  let best=-999999;
+  let bestMove={dx:10,dy:0};
 
-  return {
-    dx:next.x-head.x,
-    dy:next.y-head.y
-  };
+  for(let m of moves()){
+    let sim=clone(snake);
+
+    let ok=true;
+
+    for(let i=0;i<10;i++){
+      sim=simulate(sim,m);
+      if(!sim){ok=false;break;}
+    }
+
+    let score=evaluate(ok?sim:null);
+
+    if(score>best){
+      best=score;
+      bestMove=m;
+    }
+  }
+
+  return bestMove;
 }
 
 // ================= UPDATE =================
 function update(){
-  foodSystem();
+  if(!gameRunning) return;
 
-  let m = getMove();
+  if(foods.length<3) spawnFood();
 
-  let head = {
-    x: snake[0].x + m.dx,
-    y: snake[0].y + m.dy
+  let m=getMove();
+
+  let head={
+    x:snake[0].x+m.dx,
+    y:snake[0].y+m.dy
   };
+
+  // 💀 COLLISION
+  if(snake.some(s=>s.x===head.x && s.y===head.y)){
+    gameOver();
+    return;
+  }
 
   snake.unshift(head);
 
-  let ate = false;
+  let ate=false;
 
-  foods = foods.filter(f=>{
-    if(f.x === head.x && f.y === head.y){
-      ate = true;
-
-      score += f.type==="gold" ? 50 : 10;
-
-      grow++; // 🐍 GROWTH SYSTEM
-
+  foods=foods.filter(f=>{
+    if(f.x===head.x && f.y===head.y){
+      ate=true;
+      score+=10;
+      grow++;
       return false;
     }
     return true;
   });
 
-  // 🐍 IMPORTANT: growth logic
-  if(grow > 0){
-    grow--; // keep tail = grow
+  if(grow>0){
+    grow--;
   } else {
-    snake.pop(); // normal movement
+    snake.pop();
   }
 
-  document.getElementById("score").innerText = "Score: " + score;
+  document.getElementById("score").innerText="Score: "+score;
 }
 
 // ================= DRAW =================
 function draw(){
   ctx.clearRect(0,0,600,600);
 
-  // snake (gradient growth feel)
   snake.forEach((s,i)=>{
-    let hue = (i*10 + performance.now()*0.05)%360;
-    ctx.fillStyle = `hsl(${hue},100%,60%)`;
+    ctx.fillStyle=`hsl(${i*10},100%,60%)`;
     ctx.fillRect(s.x,s.y,10,10);
   });
 
-  // food
   foods.forEach(f=>{
-    f.pulse += 0.1;
-
-    let size = 10 + Math.sin(f.pulse)*2;
-
-    ctx.fillStyle = f.type==="gold" ? "gold" : "red";
-    ctx.fillRect(f.x,f.y,size,size);
+    ctx.fillStyle="red";
+    ctx.fillRect(f.x,f.y,10,10);
   });
+}
+
+// ================= GAME OVER =================
+function gameOver(){
+  gameRunning=false;
+  document.getElementById("gameOver").style.display="flex";
+
+  let t=5;
+  document.getElementById("countdown").innerText="Restarting in "+t;
+
+  let interval=setInterval(()=>{
+    t--;
+    document.getElementById("countdown").innerText="Restarting in "+t;
+
+    if(t<=0){
+      clearInterval(interval);
+      restart();
+    }
+  },1000);
+}
+
+// ================= RESTART =================
+function restart(){
+  reset();
 }
 
 // ================= LOOP =================
 function loop(){
   update();
   draw();
-  setTimeout(loop,speed);
+  setTimeout(loop,60);
 }
 
 loop();
