@@ -3,14 +3,14 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Snake Arcade INSANE</title>
+<title>Snake - Perfect AI Mode</title>
 
 <style>
 body {
   margin: 0;
   background: black;
   overflow: hidden;
-  font-family: 'Segoe UI', sans-serif;
+  font-family: Arial;
 }
 
 canvas {
@@ -26,32 +26,17 @@ canvas {
 }
 
 #score {
-  font-size: 28px;
+  font-size: 26px;
   font-weight: bold;
-}
-
-#combo {
-  font-size: 18px;
-  color: gold;
 }
 
 #alerts {
   position: absolute;
-  bottom: 50px;
+  bottom: 40px;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 26px;
   color: white;
-  text-shadow: 0 0 20px white;
-}
-
-.alert {
-  animation: floatUp 2s ease-out forwards;
-}
-
-@keyframes floatUp {
-  0% { opacity: 1; }
-  100% { opacity: 0; transform: translateY(-50px); }
+  font-size: 22px;
 }
 </style>
 
@@ -63,213 +48,95 @@ canvas {
 
 <div id="ui">
   <div id="score">Score: 0</div>
-  <div id="combo">Combo: x1</div>
 </div>
 
 <div id="alerts"></div>
 
 <script>
+// ================= CANVAS =================
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 canvas.width = 600;
 canvas.height = 600;
 
-// ===== SOUND =====
-const sounds = {
-  eat: new Audio("https://actions.google.com/sounds/v1/cartoon/pop.ogg"),
-  gift: new Audio("https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg"),
-  big: new Audio("https://actions.google.com/sounds/v1/explosions/explosion.ogg")
-};
+// ================= GRID =================
+const GRID = 10;
+const COLS = canvas.width / GRID;
+const ROWS = canvas.height / GRID;
 
-function play(s,v=0.5){
-  sounds[s].volume=v;
-  sounds[s].currentTime=0;
-  sounds[s].play();
-}
+// ================= STATE =================
+let snake = [{x:300,y:300}];
+let foods = [];
+let score = 0;
+let speed = 60;
 
-// ===== EFFECTS =====
-let shakeTime=0, shakePower=0;
-let zoom=1;
-let flash=0;
+// ================= HAMILTONIAN CYCLE =================
+let path = [];
 
-function shakeScreen(p=10,t=300){shakePower=p;shakeTime=t;}
-function triggerZoom(a=1.2){zoom=a;}
-function triggerFlash(p=1){flash+=p;if(flash>1)flash=1;}
+function buildCycle(){
+  let p = [];
 
-function applyEffects(){
-  let x=0,y=0;
-  if(shakeTime>0){
-    shakeTime-=16;
-    x=(Math.random()-0.5)*shakePower;
-    y=(Math.random()-0.5)*shakePower;
+  for(let y=0;y<ROWS;y++){
+    if(y % 2 === 0){
+      for(let x=0;x<COLS;x++){
+        p.push({x:x*GRID,y:y*GRID});
+      }
+    } else {
+      for(let x=COLS-1;x>=0;x--){
+        p.push({x:x*GRID,y:y*GRID});
+      }
+    }
   }
-  zoom += (1-zoom)*0.1;
-  canvas.style.transform=`translate(${x}px,${y}px) scale(${zoom})`;
+
+  return p;
 }
 
-// ===== PARTICLES =====
-let particles=[];
-function spawnParticles(x,y,color,count=10){
-  for(let i=0;i<count;i++){
-    particles.push({
-      x,y,
-      vx:(Math.random()-0.5)*4,
-      vy:(Math.random()-0.5)*4,
-      life:1,
-      color
-    });
-  }
-}
-function updateParticles(){
-  particles.forEach(p=>{
-    p.x+=p.vx;
-    p.y+=p.vy;
-    p.life-=0.02;
+path = buildCycle();
+
+// ================= FOOD =================
+function spawnFood(){
+  foods.push({
+    x: Math.floor(Math.random()*COLS)*GRID,
+    y: Math.floor(Math.random()*ROWS)*GRID
   });
-  particles=particles.filter(p=>p.life>0);
-}
-function drawParticles(){
-  particles.forEach(p=>{
-    ctx.globalAlpha=p.life;
-    ctx.fillStyle=p.color;
-    ctx.fillRect(p.x,p.y,4,4);
-  });
-  ctx.globalAlpha=1;
 }
 
-// ===== GAME =====
-const GRID=10;
-const COLS=600/GRID;
-const ROWS=600/GRID;
+// keep food alive
+setInterval(()=> {
+  if(foods.length < 3) spawnFood();
+}, 800);
 
-let snake=[{x:300,y:300}];
-let dx=10,dy=0;
-let foods=[];
-let score=0,combo=1,speed=100;
+// ================= PERFECT AI =================
+function getNextMove(){
+  let head = snake[0];
 
-// ===== UI =====
-function showAlert(t){
-  let d=document.createElement("div");
-  d.className="alert";
-  d.innerText=t;
-  document.getElementById("alerts").appendChild(d);
-  setTimeout(()=>d.remove(),2000);
+  let i = path.findIndex(p => p.x === head.x && p.y === head.y);
+
+  let next = path[(i + 1) % path.length];
+
+  return {
+    dx: next.x - head.x,
+    dy: next.y - head.y
+  };
 }
 
-// ===== FOOD =====
-function spawnFood(type="normal",amt=1){
-  for(let i=0;i<amt;i++){
-    foods.push({
-      x:Math.floor(Math.random()*COLS)*GRID,
-      y:Math.floor(Math.random()*ROWS)*GRID,
-      type,
-      pulse:Math.random()*Math.PI
-    });
-  }
-}
-
-// ===== PATH =====
-let path=[];
-for(let y=0;y<ROWS;y++){
-  if(y%2===0){
-    for(let x=0;x<COLS;x++) path.push({x:x*GRID,y:y*GRID});
-  } else {
-    for(let x=COLS-1;x>=0;x--) path.push({x:x*GRID,y:y*GRID});
-  }
-}
-
-// ===== AI =====
-function move(){
-  let h=snake[0];
-  let i=path.findIndex(p=>p.x===h.x&&p.y===h.y);
-  let n=path[(i+1)%path.length];
-  return {dx:n.x-h.x,dy:n.y-h.y};
-}
-
-// ===== BOSS =====
-let boss=false,bossHP=0,bossPulse=0;
-let bossX=300,bossY=200;
-
-function startBoss(){
-  boss=true;
-  bossHP=100;
-  triggerZoom(1.5);
-  shakeScreen(20,999999);
-  triggerFlash(1);
-  play("big",0.8);
-  showAlert("💀 BOSS FIGHT!");
-}
-
-function hitBoss(d){
-  if(!boss) return;
-  bossHP-=d;
-  shakeScreen(10,200);
-  triggerFlash(0.3);
-  spawnParticles(bossX,bossY,"red",20);
-
-  if(bossHP<=0){
-    boss=false;
-    triggerFlash(1);
-    play("big",1);
-    showAlert("🎉 BOSS DEFEATED!");
-    spawnFood("gold",25);
-  }
-}
-
-// ===== TIKFINITY =====
-const ws=new WebSocket("ws://localhost:21213/");
-
-ws.onmessage=(e)=>{
-  let d=JSON.parse(e.data);
-  if(d.event==="gift"){
-    let g=d.data.giftName;
-
-    play("gift",0.4);
-
-    if(g==="Galaxy" && !boss) startBoss();
-
-    if(g==="Rose"){
-      spawnFood();
-      hitBoss(1);
-      showAlert("🌹 HIT");
-    }
-
-    if(g==="Lion"){
-      spawnFood("normal",10);
-      hitBoss(10);
-      triggerZoom(1.2);
-      triggerFlash(0.5);
-      spawnParticles(300,300,"white",40);
-      showAlert("🦁 BIG HIT");
-    }
-
-    if(g==="Galaxy"){
-      spawnFood("gold",8);
-      hitBoss(25);
-      triggerZoom(1.4);
-      triggerFlash(1);
-      spawnParticles(300,300,"white",60);
-      showAlert("🌌 CRITICAL");
-    }
-  }
-};
-
-// ===== LOOP =====
+// ================= GAME LOOP =================
 function update(){
-  let m=move();
-  dx=m.dx; dy=m.dy;
+  let move = getNextMove();
 
-  let h={x:snake[0].x+dx,y:snake[0].y+dy};
-  snake.unshift(h);
+  let head = {
+    x: snake[0].x + move.dx,
+    y: snake[0].y + move.dy
+  };
 
-  let ate=false;
+  snake.unshift(head);
 
-  foods=foods.filter(f=>{
-    if(f.x===h.x&&f.y===h.y){
-      ate=true;
-      play("eat",0.3);
-      spawnParticles(h.x,h.y,f.type==="gold"?"gold":"red",12);
-      score+=f.type==="gold"?50:10;
+  let ate = false;
+
+  foods = foods.filter(f => {
+    if(f.x === head.x && f.y === head.y){
+      ate = true;
+      score += 10;
       return false;
     }
     return true;
@@ -277,71 +144,29 @@ function update(){
 
   if(!ate) snake.pop();
 
-  if(boss){
-    spawnParticles(bossX,bossY,"red",2);
-  }
-
-  updateParticles();
-
-  document.getElementById("score").innerText="Score: "+score;
+  document.getElementById("score").innerText = "Score: " + score;
 }
 
+// ================= DRAW =================
 function draw(){
   ctx.clearRect(0,0,600,600);
 
-  // flash
-  if(flash>0){
-    ctx.fillStyle=`rgba(255,255,255,${flash})`;
-    ctx.fillRect(0,0,600,600);
-    flash*=0.85;
-  }
-
-  // grid
-  ctx.strokeStyle="rgba(255,255,255,0.05)";
-  for(let i=0;i<600;i+=20){
-    ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,600); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(600,i); ctx.stroke();
-  }
-
-  // snake rainbow
+  // snake neon
   snake.forEach((s,i)=>{
-    let hue=(performance.now()*0.1+i*10)%360;
-    ctx.fillStyle=`hsl(${hue},100%,60%)`;
-    ctx.shadowBlur=20;
-    ctx.shadowColor=ctx.fillStyle;
+    let hue = (i*10 + performance.now()*0.05) % 360;
+    ctx.fillStyle = `hsl(${hue},100%,60%)`;
     ctx.fillRect(s.x,s.y,10,10);
   });
-  ctx.shadowBlur=0;
 
   // food
   foods.forEach(f=>{
-    f.pulse+=0.15;
-    let size=10+Math.sin(f.pulse)*3;
-    ctx.fillStyle=f.type==="gold"?"gold":"red";
-    ctx.fillRect(f.x,f.y,size,size);
+    ctx.fillStyle = "red";
+    ctx.fillRect(f.x,f.y,10,10);
   });
-
-  // boss
-  if(boss){
-    bossPulse+=0.1;
-    let size=50+Math.sin(bossPulse)*5;
-    ctx.shadowBlur=40;
-    ctx.shadowColor="red";
-    ctx.fillStyle="darkred";
-    ctx.fillRect(bossX-size/2,bossY-size/2,size,size);
-    ctx.shadowBlur=0;
-
-    ctx.fillStyle="black";
-    ctx.fillRect(150,20,300,20);
-    ctx.fillStyle="red";
-    ctx.fillRect(150,20,(bossHP/100)*300,20);
-  }
-
-  drawParticles();
 }
 
+// ================= LOOP =================
 function loop(){
-  applyEffects();
   update();
   draw();
   setTimeout(loop,speed);
